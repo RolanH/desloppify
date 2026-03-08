@@ -28,6 +28,46 @@ _EXT_SWAPS = {'.ts': '.tsx', '.tsx': '.ts', '.js': '.jsx', '.jsx': '.js'}
 _VALID_EFFORTS = {"trivial", "small", "medium", "large"}
 
 
+def _auto_confirm_stage(
+    *,
+    plan: dict,
+    stage_record: dict,
+    stage_name: str,
+    stage_label: str,
+    attestation: str | None,
+    blocked_heading: str,
+    confirm_cmd: str,
+    inline_hint: str,
+    dimensions: list[str] | None = None,
+    cluster_names: list[str] | None = None,
+) -> bool:
+    """Shared auto-confirm flow for stage fold-confirm operations."""
+    if stage_record.get("confirmed_at"):
+        return True
+    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
+        print(colorize(f"  {blocked_heading}", "red"))
+        print(colorize(f"  Run: {confirm_cmd}", "dim"))
+        print(colorize(f"  {inline_hint}", "dim"))
+        return False
+
+    confirmed_text = attestation.strip()
+    validation_err = _validate_attestation(
+        confirmed_text,
+        stage_name,
+        dimensions=dimensions,
+        cluster_names=cluster_names,
+    )
+    if validation_err:
+        print(colorize(f"  {validation_err}", "red"))
+        return False
+
+    stage_record["confirmed_at"] = utc_now()
+    stage_record["confirmed_text"] = confirmed_text
+    save_plan(plan)
+    print(colorize(f"  ✓ {stage_label} auto-confirmed via --attestation.", "green"))
+    return True
+
+
 def _auto_confirm_observe_if_attested(
     *,
     plan: dict,
@@ -35,27 +75,21 @@ def _auto_confirm_observe_if_attested(
     attestation: str | None,
     triage_input,
 ) -> bool:
-    if stages["observe"].get("confirmed_at"):
-        return True
-    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
-        print(colorize("  Cannot reflect: observe stage not confirmed.", "red"))
-        print(colorize("  Run: desloppify plan triage --confirm observe", "dim"))
-        print(colorize("  Or pass --attestation to auto-confirm observe inline.", "dim"))
+    observe_stage = stages.get("observe")
+    if observe_stage is None:
         return False
     _by_dim, dim_names = observe_dimension_breakdown(triage_input)
-    validation_err = _validate_attestation(
-        attestation.strip(),
-        "observe",
+    return _auto_confirm_stage(
+        plan=plan,
+        stage_record=observe_stage,
+        stage_name="observe",
+        stage_label="Observe",
+        attestation=attestation,
+        blocked_heading="Cannot reflect: observe stage not confirmed.",
+        confirm_cmd="desloppify plan triage --confirm observe",
+        inline_hint="Or pass --attestation to auto-confirm observe inline.",
         dimensions=dim_names,
     )
-    if validation_err:
-        print(colorize(f"  {validation_err}", "red"))
-        return False
-    stages["observe"]["confirmed_at"] = utc_now()
-    stages["observe"]["confirmed_text"] = attestation.strip()
-    save_plan(plan)
-    print(colorize("  ✓ Observe auto-confirmed via --attestation.", "green"))
-    return True
 
 
 def _validate_recurring_dimension_mentions(
@@ -108,12 +142,8 @@ def _auto_confirm_reflect_for_organize(
     stages: dict,
     attestation: str | None,
 ) -> bool:
-    if stages["reflect"].get("confirmed_at"):
-        return True
-    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
-        print(colorize("  Cannot organize: reflect stage not confirmed.", "red"))
-        print(colorize("  Run: desloppify plan triage --confirm reflect", "dim"))
-        print(colorize("  Or pass --attestation to auto-confirm reflect inline.", "dim"))
+    reflect_stage = stages.get("reflect")
+    if reflect_stage is None:
         return False
 
     runtime = command_runtime(args)
@@ -127,20 +157,18 @@ def _auto_confirm_reflect_for_organize(
     reflect_clusters = [
         name for name in plan.get("clusters", {}) if not plan["clusters"][name].get("auto")
     ]
-    validation_err = _validate_attestation(
-        attestation.strip(),
-        "reflect",
+    return _auto_confirm_stage(
+        plan=plan,
+        stage_record=reflect_stage,
+        stage_name="reflect",
+        stage_label="Reflect",
+        attestation=attestation,
+        blocked_heading="Cannot organize: reflect stage not confirmed.",
+        confirm_cmd="desloppify plan triage --confirm reflect",
+        inline_hint="Or pass --attestation to auto-confirm reflect inline.",
         dimensions=reflect_dims,
         cluster_names=reflect_clusters,
     )
-    if validation_err:
-        print(colorize(f"  {validation_err}", "red"))
-        return False
-    stages["reflect"]["confirmed_at"] = utc_now()
-    stages["reflect"]["confirmed_text"] = attestation.strip()
-    save_plan(plan)
-    print(colorize("  ✓ Reflect auto-confirmed via --attestation.", "green"))
-    return True
 
 
 def _manual_clusters_or_error(plan: dict) -> list[str] | None:
@@ -496,14 +524,8 @@ def _auto_confirm_enrich_for_complete(
     stages: dict,
     attestation: str | None,
 ) -> bool:
-    if stages.get("enrich", {}).get("confirmed_at"):
-        return True
-    if "enrich" not in stages:
-        return False
-    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
-        print(colorize("  Cannot complete: enrich stage not confirmed.", "red"))
-        print(colorize("  Run: desloppify plan triage --confirm enrich", "dim"))
-        print(colorize("  Or pass --attestation to auto-confirm enrich inline.", "dim"))
+    enrich_stage = stages.get("enrich")
+    if enrich_stage is None:
         return False
 
     # Re-validate underspecified steps at auto-confirm time
@@ -519,19 +541,17 @@ def _auto_confirm_enrich_for_complete(
     cluster_names = [
         name for name in plan.get("clusters", {}) if not plan["clusters"][name].get("auto")
     ]
-    validation_err = _validate_attestation(
-        attestation.strip(),
-        "enrich",
+    return _auto_confirm_stage(
+        plan=plan,
+        stage_record=enrich_stage,
+        stage_name="enrich",
+        stage_label="Enrich",
+        attestation=attestation,
+        blocked_heading="Cannot complete: enrich stage not confirmed.",
+        confirm_cmd="desloppify plan triage --confirm enrich",
+        inline_hint="Or pass --attestation to auto-confirm enrich inline.",
         cluster_names=cluster_names,
     )
-    if validation_err:
-        print(colorize(f"  {validation_err}", "red"))
-        return False
-    stages["enrich"]["confirmed_at"] = utc_now()
-    stages["enrich"]["confirmed_text"] = attestation.strip()
-    save_plan(plan)
-    print(colorize("  ✓ Enrich auto-confirmed via --attestation.", "green"))
-    return True
 
 
 def _require_sense_check_stage_for_complete(
@@ -556,32 +576,24 @@ def _auto_confirm_sense_check_for_complete(
     stages: dict,
     attestation: str | None,
 ) -> bool:
-    if stages.get("sense-check", {}).get("confirmed_at"):
-        return True
-    if "sense-check" not in stages:
-        return False
-    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
-        print(colorize("  Cannot complete: sense-check stage not confirmed.", "red"))
-        print(colorize("  Run: desloppify plan triage --confirm sense-check", "dim"))
-        print(colorize("  Or pass --attestation to auto-confirm sense-check inline.", "dim"))
+    sense_check_stage = stages.get("sense-check")
+    if sense_check_stage is None:
         return False
 
     cluster_names = [
         name for name in plan.get("clusters", {}) if not plan["clusters"][name].get("auto")
     ]
-    validation_err = _validate_attestation(
-        attestation.strip(),
-        "sense-check",
+    return _auto_confirm_stage(
+        plan=plan,
+        stage_record=sense_check_stage,
+        stage_name="sense-check",
+        stage_label="Sense-check",
+        attestation=attestation,
+        blocked_heading="Cannot complete: sense-check stage not confirmed.",
+        confirm_cmd="desloppify plan triage --confirm sense-check",
+        inline_hint="Or pass --attestation to auto-confirm sense-check inline.",
         cluster_names=cluster_names,
     )
-    if validation_err:
-        print(colorize(f"  {validation_err}", "red"))
-        return False
-    stages["sense-check"]["confirmed_at"] = utc_now()
-    stages["sense-check"]["confirmed_text"] = attestation.strip()
-    save_plan(plan)
-    print(colorize("  ✓ Sense-check auto-confirmed via --attestation.", "green"))
-    return True
 
 
 def _require_organize_stage_for_complete(
@@ -634,30 +646,24 @@ def _auto_confirm_organize_for_complete(
     stages: dict,
     attestation: str | None,
 ) -> bool:
-    if stages["organize"].get("confirmed_at"):
-        return True
-    if not attestation or len(attestation.strip()) < _MIN_ATTESTATION_LEN:
-        print(colorize("  Cannot complete: organize stage not confirmed.", "red"))
-        print(colorize("  Run: desloppify plan triage --confirm organize", "dim"))
-        print(colorize("  Or pass --attestation to auto-confirm organize inline.", "dim"))
+    organize_stage = stages.get("organize")
+    if organize_stage is None:
         return False
 
     organize_clusters = [
         name for name in plan.get("clusters", {}) if not plan["clusters"][name].get("auto")
     ]
-    validation_err = _validate_attestation(
-        attestation.strip(),
-        "organize",
+    return _auto_confirm_stage(
+        plan=plan,
+        stage_record=organize_stage,
+        stage_name="organize",
+        stage_label="Organize",
+        attestation=attestation,
+        blocked_heading="Cannot complete: organize stage not confirmed.",
+        confirm_cmd="desloppify plan triage --confirm organize",
+        inline_hint="Or pass --attestation to auto-confirm organize inline.",
         cluster_names=organize_clusters,
     )
-    if validation_err:
-        print(colorize(f"  {validation_err}", "red"))
-        return False
-    stages["organize"]["confirmed_at"] = utc_now()
-    stages["organize"]["confirmed_text"] = attestation.strip()
-    save_plan(plan)
-    print(colorize("  ✓ Organize auto-confirmed via --attestation.", "green"))
-    return True
 
 
 def _completion_clusters_valid(plan: dict, state: dict | None = None) -> bool:
